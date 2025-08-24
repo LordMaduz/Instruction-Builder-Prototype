@@ -11,7 +11,9 @@ INSERT INTO h_murex_booking (
     intermediary_portfolio,
     broker_label,
     split_cross,
-    split_spot_swap, family_grp_type
+    split_spot_swap,
+    family_grp_type,
+    murex_booking_record
 ) VALUES (
     :tradeReference,
     :tradeExecutionDate,
@@ -26,5 +28,6 @@ INSERT INTO h_murex_booking (
     :brokerLabel,
     :splitCross,
     :splitSpotSwap,
-    :familyGrpType
+    :familyGrpType,
+    :murexBookingRecord
 );
