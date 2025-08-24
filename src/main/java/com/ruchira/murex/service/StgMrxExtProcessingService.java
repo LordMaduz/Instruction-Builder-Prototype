@@ -6,6 +6,7 @@ import com.ruchira.murex.dto.StgMrxExtDmcDto;
 import com.ruchira.murex.model.TransformedMurexTrade;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -30,6 +31,7 @@ public class StgMrxExtProcessingService {
      * @param murexBookCode Murex book code from murex book configurations
      * @return List of generated DMC records with enhanced metadata
      */
+    @Transactional
     public List<StgMrxExtDmcDto> generateDmcRecords(final List<TransformedMurexTrade> transformedMurexTrades,
                                                     final String murexBookCode,
                                                     final String instructionEventRuleId,

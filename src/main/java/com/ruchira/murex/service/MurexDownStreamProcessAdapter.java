@@ -1,5 +1,6 @@
 package com.ruchira.murex.service;
 
+import com.ruchira.murex.exception.BusinessException;
 import com.ruchira.murex.kafka.model.HAWKMurexBookingRecord;
 import com.ruchira.murex.kafka.model.HAWKMurexBookingTradeLeg;
 import com.ruchira.murex.kafka.model.HawkMurexBookingTradeLegAdditionalFields;
@@ -21,16 +22,17 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class MurexDownstreamPublisher {
+public class MurexDownStreamProcessAdapter {
 
     private final KafkaPublisherHandler publisherHandler;
     private final HawkMurexBookingMapper murexBookingMapper;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void publishMurexTradesToDownStream(MurexTrade murexTrade) {
-
+    public HAWKMurexBookingRecord mapToHawkBookingRecordForDownStreamPublishing(MurexTrade murexTrade) {
+        final String tradeReference = murexTrade.getTradeReference();
         try {
-            log.debug("Starting the process to publish the trade ID: {}", murexTrade.getTradeReference());
+            log.info("Starting downstream mapping process for trade reference: {}", tradeReference);
+
 
             // Map main booking record
             HAWKMurexBookingRecord murexBookingRecord = murexBookingMapper.toHawkMurexBooking(murexTrade);
@@ -53,13 +55,11 @@ public class MurexDownstreamPublisher {
             } else {
                 log.debug("No far leg present for trade reference: {}", murexTrade.getTradeReference());
             }
-
-            // Publish the trade
-            log.info("Publishing HAWK Murex trade to topic 'murex-topic', trade reference: {}", murexTrade.getTradeReference());
-            publisherHandler.publish("murex-topic", murexBookingRecord);
-
+            log.info("Successfully mapped trade {} into HAWK booking record", tradeReference);
+            return murexBookingRecord;
         } catch (Exception ex) {
-            log.error("Failed to publish trade reference: {} due to error: {}", murexTrade.getTradeReference(), ex.getMessage(), ex);
+            log.error("Failed to map trade {} into HAWK booking record. Error: {}", murexTrade.getTradeReference(), ex.getMessage(), ex);
+            throw new BusinessException(String.format("Failed to map trade to Murex Downstream Publishing %s", tradeReference), ex);
         }
     }
 
@@ -80,5 +80,11 @@ public class MurexDownstreamPublisher {
         }
 
         return leg;
+    }
+
+    public void publishHawkMurexTradeToDownStream(HAWKMurexBookingRecord murexBookingRecord, final String tradeReference) {
+        // Publish the trade
+        log.info("Publishing HAWK Murex trade to topic 'murex-topic', trade reference: {}", tradeReference);
+        publisherHandler.publish("murex-topic", murexBookingRecord);
     }
 }

@@ -1,5 +1,6 @@
 package com.ruchira.murex.service;
 
+import com.ruchira.murex.kafka.model.HAWKMurexBookingRecord;
 import com.ruchira.murex.util.ConcurrencyUtil;
 import com.ruchira.murex.dto.InstructionRequestDto;
 import com.ruchira.murex.dto.StgMrxExtDmcDto;
@@ -31,7 +32,7 @@ import static com.ruchira.murex.constant.Constants.*;
 public class InboundInstructionProcessingService {
 
     private final TradeDataHandlerService tradeDataHandlerService;
-    private final MurexDownstreamPublisher murexDownstreamPublisher;
+    private final MurexDownStreamProcessAdapter murexDownStreamProcessAdapter;
     private final JsonParser jsonParser;
     private final MurexDataTransformationService murexDataTransformationService;
 
@@ -242,8 +243,9 @@ public class InboundInstructionProcessingService {
             try {
                 log.debug("Starting processing for trade ID: {}", trade.getTradeReference());
 
-                publishMurexBookingToDatabase(trade);
-                publishMurexTradesToDownStream(trade);
+                final HAWKMurexBookingRecord murexBookingRecord = mapToHawkBookingRecord(trade);
+                publishMurexBookingToDatabase(trade, murexBookingRecord);
+                publishHawkBookingRecordToDownStream(murexBookingRecord, trade.getTradeReference());
             } catch (Exception e) {
                 log.error("Failed to publish the GeneratedMurexTrade trade {}: {}", tradeRef, e.getMessage(), e);
             }
@@ -251,26 +253,19 @@ public class InboundInstructionProcessingService {
 
     }
 
-    private void publishMurexTradesToDownStream(MurexTrade murexTrade) {
-        murexDownstreamPublisher.publishMurexTradesToDownStream(murexTrade);
+    public HAWKMurexBookingRecord mapToHawkBookingRecord(MurexTrade murexTrade) {
+        return murexDownStreamProcessAdapter.mapToHawkBookingRecordForDownStreamPublishing(murexTrade);
     }
 
-    /**
-     * Inserts a MurexTradeDTO into the database including near/far legs and their components.
-     *
-     * <p>For each trade:
-     * - Inserts the main trade and retrieves tradeId.
-     * - Inserts the NearLeg (if present) and its components.
-     * - Inserts the FarLeg (if present) and its components.
-     * </p>
-     * <p>
-     * Uses ObjectMapper to convert POJOs to Maps for named-parameter JDBC inserts.
-     * Logs errors with full context for traceability.
-     *
-     * @param murexTrade list of trades to insert
-     */
-    private void publishMurexBookingToDatabase(MurexTrade murexTrade) {
-        tradeDataHandlerService.publishMurexBookingToDatabase(murexTrade);
+    public void publishHawkBookingRecordToDownStream(HAWKMurexBookingRecord murexBookingRecord, final String tradeReference) {
+        murexDownStreamProcessAdapter.publishHawkMurexTradeToDownStream(murexBookingRecord, tradeReference);
+    }
+
+    private void publishMurexBookingToDatabase(
+            final MurexTrade murexTrade,
+            final HAWKMurexBookingRecord murexBookingRecord
+    ) {
+        tradeDataHandlerService.publishMurexBookingToDatabase(murexTrade, murexBookingRecord);
     }
 
     /**

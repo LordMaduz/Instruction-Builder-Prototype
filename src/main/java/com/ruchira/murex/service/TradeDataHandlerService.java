@@ -1,8 +1,10 @@
 package com.ruchira.murex.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.ruchira.murex.constant.Constants;
 import com.ruchira.murex.dto.StgMrxExtDmcDto;
 import com.ruchira.murex.freemaker.FtlQueryBuilder;
+import com.ruchira.murex.kafka.model.HAWKMurexBookingRecord;
 import com.ruchira.murex.model.AggregatedDataResponse;
 import com.ruchira.murex.model.Currency;
 import com.ruchira.murex.model.GroupedRecord;
@@ -159,13 +161,16 @@ public class TradeDataHandlerService {
      */
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void publishMurexBookingToDatabase(MurexTrade murexTrade) {
+    public void publishMurexBookingToDatabase(
+            final MurexTrade murexTrade,
+            final HAWKMurexBookingRecord murexBookingRecord
+    ) {
 
         final String tradeRef = murexTrade.getTradeReference();
         try {
 
             // 1. Insert Main trade
-            Long tradeId = insertMainTrade(murexTrade);
+            Long tradeId = insertMainTrade(murexTrade, murexBookingRecord);
             log.info("Inserted main trade {} with ID {}", tradeRef, tradeId);
 
             insertTradeLegIfPresent(murexTrade.getNearLeg(), tradeId, NEAR_LEG_TYPE, tradeRef);
@@ -176,8 +181,14 @@ public class TradeDataHandlerService {
         }
     }
 
-    private Long insertMainTrade(MurexTrade trade) {
+    private Long insertMainTrade(
+            final MurexTrade trade,
+            final HAWKMurexBookingRecord murexBookingRecord
+    ) throws JsonProcessingException {
         final Map<String, Object> tradeMap = jsonParser.convertValue(trade);
+        final String murexBookingJsonString = jsonParser.serializesToJsonString(murexBookingRecord);
+        tradeMap.put("murexBookingRecord", murexBookingJsonString);
+
         final String sql = ftlQueryBuilder.buildQuery(Map.of(), INSERT_DATA_TO_MUREX_BOOKING_FTL_FILE);
         return repository.insertAndReturnId(sql, tradeMap, "id");
     }

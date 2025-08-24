@@ -9,6 +9,7 @@ import com.ruchira.murex.exception.TransformationException;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -28,6 +29,7 @@ public class MurexDataTransformationService {
      * @param transformationContext which include The grouped record to process, Filtered Murex configurations,
      *                              The input currency for transformation calculations, and all grouped records
      */
+    @Transactional
     public Pair<List<StgMrxExtDmcDto>, List<MurexTrade>> generateMurexBookings(TransformationContext transformationContext) {
 
         String typology = transformationContext.getGroupedRecord().getTypology();

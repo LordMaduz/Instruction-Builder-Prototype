@@ -1,5 +1,6 @@
 package com.ruchira.murex.parser;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.ruchira.murex.exception.TransformationException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -109,8 +110,12 @@ public class JsonParser {
         }
     }
 
-    public  <T, S> T convertValue(S source) {
+    public <T, S> T convertValue(S source) {
         return objectMapper.convertValue(source, new TypeReference<T>() {
         });
+    }
+
+    public <S> String serializesToJsonString(S source) throws JsonProcessingException {
+        return objectMapper.writeValueAsString(source);
     }
 }
