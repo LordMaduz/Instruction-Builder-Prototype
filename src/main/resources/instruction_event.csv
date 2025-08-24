@@ -1,0 +1,5 @@
+"rule_id";"description";"business_event";"hedge_method";"currency_type";"nav_type";"hedging_instrument";"status";"traceId";"instruction_type"
+"R1";"INC_COH_R_C_SWAP";"Inception";"COH";"Restricted";"COI";"FX Swap";1;0;""
+"R2";"INC_COH_R_R_SWAP";"Inception";"COH";"Restricted";"RE and Reserves";"FX Swap";1;0;""
+"R3";"INC_COH_NR_C_SWAP";"Inception";"COH";"Restricted";"COI";"FX NDF";1;0;""
+"R4";"INC_COH_NR_R_SWAP";"Inception";"COH";"Restricted";"RE and Reserves";"FX NDF";1;0;""

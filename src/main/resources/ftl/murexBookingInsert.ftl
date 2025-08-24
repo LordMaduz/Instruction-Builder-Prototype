@@ -1,0 +1,30 @@
+INSERT INTO h_murex_booking (
+    trade_reference,
+    trade_execution_date,
+    trade_execution_time,
+    deal_type,
+    murex_short_label,
+    source_portfolio,
+    regional_portfolio,
+    destination_portfolio,
+    internal,
+    intermediary_portfolio,
+    broker_label,
+    split_cross,
+    split_spot_swap, family_grp_type
+) VALUES (
+    :tradeReference,
+    :tradeExecutionDate,
+    :tradeExecutionTime,
+    :dealType,
+    :murexShortLabel,
+    :sourcePortfolio,
+    :regionalPortfolio,
+    :destinationPortfolio,
+    :internal,
+    :intermediaryPortfolio,
+    :brokerLabel,
+    :splitCross,
+    :splitSpotSwap,
+    :familyGrpType
+);
