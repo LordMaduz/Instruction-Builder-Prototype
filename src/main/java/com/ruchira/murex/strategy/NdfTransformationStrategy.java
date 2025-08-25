@@ -96,22 +96,21 @@ public class NdfTransformationStrategy extends TransformationStrategy {
      * This method enables proper FX Spot lookup for dual transformations
      */
     @Override
-    public Pair<List<StgMrxExtDmcDto>, List<MurexTrade>> process(TransformationContext transformationContext) {
+    public RecordProcessingResult process(TransformationContext transformationContext) {
 
-        List<MurexTrade> murexTrades = new ArrayList<>();
-        List<StgMrxExtDmcDto> stgMrxExtDmcs = new ArrayList<>();
+        List<MurexTrade> allMurexTrades = new ArrayList<>();
+        List<StgMrxExtDmcDto> allStgMrxExtDmcs = new ArrayList<>();
 
         for (MurexBookingConfig config : transformationContext.getFilteredMurexConfigs()) {
             try {
-                List<TransformedMurexTrade> transformedMurexTrades = processNdfTransformation(
+                TransformationResult transformationResult = processNdfTransformation(
                         config,
-                        stgMrxExtDmcs,
                         transformationContext);
 
-                MurexTrade murexTrade = buildMurexTrade(transformedMurexTrades);
+                MurexTrade murexTrade = buildMurexTrade(transformationResult.getMurexTradeList());
 
-                murexTrades.add(murexTrade);
-
+                allMurexTrades.add(murexTrade);
+                allStgMrxExtDmcs.addAll(transformationResult.getStgMrxExtDmcs());
             } catch (Exception e) {
                 throw new TransformationException(
                         String.format("Failed to transform FX NDF for config %s: %s", config.getId(), e.getMessage()),
@@ -121,7 +120,7 @@ public class NdfTransformationStrategy extends TransformationStrategy {
             }
         }
 
-        return Pair.of(stgMrxExtDmcs, murexTrades);
+        return new RecordProcessingResult(allStgMrxExtDmcs, allMurexTrades);
     }
 
     private MurexTrade buildMurexTrade(List<TransformedMurexTrade> trades) {
@@ -145,24 +144,22 @@ public class NdfTransformationStrategy extends TransformationStrategy {
         return murexTrade;
     }
 
-    private void generaStgMurexExtDmcRecords(
-            final List<StgMrxExtDmcDto> stgMrxExtDmcs,
+    private List<StgMrxExtDmcDto> generaStgMurexExtDmcRecords(
             final List<TransformedMurexTrade> transformedMurexTrades,
             final String murexBookCode,
             final String instructionEventRuleId,
             final String traceId
     ) {
 
-        stgMrxExtDmcs.addAll(stgMrxExtProcessingService.generateDmcRecords(transformedMurexTrades, murexBookCode, instructionEventRuleId, traceId));
+        return stgMrxExtProcessingService.generateDmcRecords(transformedMurexTrades, murexBookCode, instructionEventRuleId, traceId);
     }
 
     /**
      * Process NDF transformation for a single MurexBookConfig
      * Determines the transformation case and applies appropriate logic
      */
-    private List<TransformedMurexTrade> processNdfTransformation(MurexBookingConfig config,
-                                                                 List<StgMrxExtDmcDto> stgMrxExtDmcs,
-                                                                 TransformationContext transformationContext) {
+    private TransformationResult processNdfTransformation(MurexBookingConfig config,
+                                                          TransformationContext transformationContext) {
 
         // Generate unique trace ID for tracking
         final String traceId = TraceIdGenerator.generateTimestampBasedTraceId();
@@ -200,11 +197,11 @@ public class NdfTransformationStrategy extends TransformationStrategy {
 
         return switch (transformationCase) {
             case BOTH_LEGS ->
-                    processBothLegsCase(murexBookings, ndfTransformation, config, stgMrxExtDmcs, transformationContext, traceId);
+                    processBothLegsCase(murexBookings, ndfTransformation, config, transformationContext, traceId);
             case EMBEDDED_SPOT_LEG_ONLY ->
-                    processEmbeddedSpotLegOnlyCase(murexBookings, ndfTransformation, config, stgMrxExtDmcs, transformationContext, traceId);
+                    processEmbeddedSpotLegOnlyCase(murexBookings, ndfTransformation, config, transformationContext, traceId);
             case DUAL_TRANSFORMATIONS ->
-                    processDualTransformationsCase(murexBookings, transformations, config, stgMrxExtDmcs, transformationContext, traceId);
+                    processDualTransformationsCase(murexBookings, transformations, config, transformationContext, traceId);
         };
     }
 
@@ -266,12 +263,11 @@ public class NdfTransformationStrategy extends TransformationStrategy {
      * Case 1: Apply transformation to both TransformedMurexTrade objects
      * Both records get the same transformation applied
      */
-    private List<TransformedMurexTrade> processBothLegsCase(List<TransformedMurexTrade> murexBookings,
-                                                            JsonNode ndfTransformation,
-                                                            MurexBookingConfig config,
-                                                            List<StgMrxExtDmcDto> stgMrxExtDmcs,
-                                                            TransformationContext transformationContext,
-                                                            String traceId) {
+    private TransformationResult processBothLegsCase(List<TransformedMurexTrade> murexBookings,
+                                                     JsonNode ndfTransformation,
+                                                     MurexBookingConfig config,
+                                                     TransformationContext transformationContext,
+                                                     String traceId) {
 
         log.info("Processing NDF Case: Both Legs transformation");
 
@@ -290,13 +286,13 @@ public class NdfTransformationStrategy extends TransformationStrategy {
                 .map(dynamicMapper::clone)
                 .toList();
 
-        List<TransformedMurexTrade> results = Stream.of(embeddedSpotLeg, forwardLeg)
+        List<TransformedMurexTrade> transformedMurexTrades = Stream.of(embeddedSpotLeg, forwardLeg)
                 .map(leg -> applyNDFTransformation(leg, ndfTransformation, config, transformationContext))
                 .toList();
 
-        generaStgMurexExtDmcRecords(stgMrxExtDmcs, transformedMurexTradesForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
+        List<StgMrxExtDmcDto> stgMrxExtDmcDtos = generaStgMurexExtDmcRecords(transformedMurexTradesForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
 
-        return results;
+        return new TransformationResult(transformedMurexTrades, stgMrxExtDmcDtos);
     }
 
     private TransformedMurexTrade applyNDFTransformation(
@@ -320,12 +316,11 @@ public class NdfTransformationStrategy extends TransformationStrategy {
     /**
      * Case 2: Identify forwardLeg by latest valueDate and apply transformation only to that record
      */
-    private List<TransformedMurexTrade> processEmbeddedSpotLegOnlyCase(List<TransformedMurexTrade> murexBookings,
-                                                                       JsonNode ndfTransformation,
-                                                                       MurexBookingConfig config,
-                                                                       List<StgMrxExtDmcDto> stgMrxExtDmcs,
-                                                                       TransformationContext transformationContext,
-                                                                       String traceId) {
+    private TransformationResult processEmbeddedSpotLegOnlyCase(List<TransformedMurexTrade> murexBookings,
+                                                                JsonNode ndfTransformation,
+                                                                MurexBookingConfig config,
+                                                                TransformationContext transformationContext,
+                                                                String traceId) {
 
         log.info("Processing NDF Case: Forward Leg Only transformation");
 
@@ -334,18 +329,16 @@ public class NdfTransformationStrategy extends TransformationStrategy {
         embeddedSpotLeg.setLegIdentificationType(NEAR_LEG_TYPE);
 
         List<TransformedMurexTrade> transformedMurexTradesForDMC = List.of(dynamicMapper.clone(embeddedSpotLeg));
-        List<TransformedMurexTrade> results = new ArrayList<>();
 
         // Apply transformation only to embedded spot leg
         TransformedMurexTrade transformedForwardLeg = applyNdfTransformation(
                 embeddedSpotLeg, ndfTransformation, config, transformationContext);
         TransformedMurexTrade tpsFieldFilteredTrade = applyTPSFieldTransformations(transformedForwardLeg, config);
 
-        results.add(tpsFieldFilteredTrade);
 
-        generaStgMurexExtDmcRecords(stgMrxExtDmcs, transformedMurexTradesForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
+        List<StgMrxExtDmcDto> stgMrxExtDmcDtos = generaStgMurexExtDmcRecords(transformedMurexTradesForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
 
-        return results;
+        return new TransformationResult(List.of(tpsFieldFilteredTrade), stgMrxExtDmcDtos);
     }
 
     /**
@@ -368,12 +361,11 @@ public class NdfTransformationStrategy extends TransformationStrategy {
      * "referenceTradeBuySell": {"buy": true, "sell": false}
      * }]
      */
-    private List<TransformedMurexTrade> processDualTransformationsCase(List<TransformedMurexTrade> murexBookings,
-                                                                       List<JsonNode> transformations,
-                                                                       MurexBookingConfig config,
-                                                                       List<StgMrxExtDmcDto> stgMrxExtDmcs,
-                                                                       TransformationContext transformationContext,
-                                                                       String traceId) {
+    private TransformationResult processDualTransformationsCase(List<TransformedMurexTrade> murexBookings,
+                                                                List<JsonNode> transformations,
+                                                                MurexBookingConfig config,
+                                                                TransformationContext transformationContext,
+                                                                String traceId) {
 
         log.info("Processing NDF Case: Dual Transformations");
 
@@ -404,13 +396,9 @@ public class NdfTransformationStrategy extends TransformationStrategy {
 
         TransformedMurexTrade tpsFieldFilteredTrade = applyTPSFieldTransformations(transformedEmbeddedSpotLeg, config);
 
-        // Return both legs with transformations applied
-        List<TransformedMurexTrade> results = new ArrayList<>();
-        results.add(tpsFieldFilteredTrade); // Embedded spot leg with transformations
+        List<StgMrxExtDmcDto> stgMrxExtDmcDtos = generaStgMurexExtDmcRecords(tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
 
-        generaStgMurexExtDmcRecords(stgMrxExtDmcs, tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
-
-        return results;
+        return new TransformationResult(List.of(tpsFieldFilteredTrade), stgMrxExtDmcDtos);
     }
 
     /**

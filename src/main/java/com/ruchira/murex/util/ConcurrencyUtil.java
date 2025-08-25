@@ -3,7 +3,9 @@ package com.ruchira.murex.util;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.StructuredTaskScope;
 
 @UtilityClass
@@ -22,23 +24,30 @@ public class ConcurrencyUtil {
      * @param <T>     Type of record
      * @throws Exception If any processing task fails
      */
-    public static <T> void processAllOrNone(List<T> records,
-                                            RecordTask<T> task) throws Exception {
+    public static <T, R> List<R> processAllOrNone(List<T> records,
+                                                  RecordTask<T, R> task) throws Exception {
         try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+            List<StructuredTaskScope.Subtask<R>> futures = new ArrayList<>();
 
             for (var record : records) {
-                scope.fork(() -> {
+                futures.add(scope.fork(() -> {
                     try {
-                        task.process(record);
+                        return task.process(record);
                     } catch (Exception e) {
                         log.error("Processing failed for item: {}", record, e);
                         throw e;
                     }
-                    return null;
-                });
+                }));
             }
             scope.join();
             scope.throwIfFailed();
+
+            // collect all results (non-null)
+            return futures.stream()
+                    .map(StructuredTaskScope.Subtask::get)
+                    .filter(Objects::nonNull)
+                    .toList();
+
         } catch (Exception ex) {
             log.error("One or more tasks failed in processAllOrNone: {}", ex.getMessage(), ex);
             throw ex;
@@ -49,7 +58,7 @@ public class ConcurrencyUtil {
      * Functional interface for tasks that throw checked exceptions.
      */
     @FunctionalInterface
-    public interface RecordTask<T> {
-        void process(T item) throws Exception;
+    public interface RecordTask<T, R> {
+        R process(T item) throws Exception;
     }
 }

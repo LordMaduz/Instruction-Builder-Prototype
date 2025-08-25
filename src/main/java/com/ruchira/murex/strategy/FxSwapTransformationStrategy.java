@@ -56,13 +56,13 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
     }
 
     @Override
-    public Pair<List<StgMrxExtDmcDto>, List<MurexTrade>> process(TransformationContext transformationContext) {
+    public RecordProcessingResult process(TransformationContext transformationContext) {
 
         final GroupedRecord groupedRecord = transformationContext.getGroupedRecord();
         validateRecordCount(groupedRecord);
 
-        List<MurexTrade> murexTrades = new ArrayList<>();
-        List<StgMrxExtDmcDto> stgMrxExtDmcs = new ArrayList<>();
+        List<MurexTrade> allMurexTrades = new ArrayList<>();
+        List<StgMrxExtDmcDto> allStgMrxExtDmcs = new ArrayList<>();
 
         // Create base booking from both records
         List<TransformedMurexTrade> baseBookings = createBaseBookings(groupedRecord.getRecords());
@@ -74,12 +74,13 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
             try {
 
                 // Process transformations based on configuration structure
-                List<TransformedMurexTrade> transformedTradeLeg = processSwapTransformations(
-                        legResult, config, transformationContext, stgMrxExtDmcs);
+                final TransformationResult transformationResult = processSwapTransformations(
+                        legResult, config, transformationContext);
 
-                MurexTrade murexTrade = buildMurexTrade(transformedTradeLeg);
+                MurexTrade murexTrade = buildMurexTrade(transformationResult.getMurexTradeList());
 
-                murexTrades.add(murexTrade);
+                allMurexTrades.add(murexTrade);
+                allStgMrxExtDmcs.addAll(transformationResult.getStgMrxExtDmcs());
 
             } catch (Exception e) {
                 throw new TransformationException(
@@ -90,7 +91,7 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
             }
         }
 
-        return Pair.of(stgMrxExtDmcs, murexTrades);
+        return new RecordProcessingResult(allStgMrxExtDmcs, allMurexTrades);
     }
 
     private MurexTrade buildMurexTrade(List<TransformedMurexTrade> trades) {
@@ -123,15 +124,14 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
         }
     }
 
-    private void generaStgMurexExtDmcRecords(
-            final List<StgMrxExtDmcDto> stgMrxExtDmcs,
+    private List<StgMrxExtDmcDto> generaStgMurexExtDmcRecords(
             final List<TransformedMurexTrade> transformedMurexTrades,
             final String murexBookCode,
             final String instructionEventRuleId,
             final String traceId
     ) {
 
-        stgMrxExtDmcs.addAll(stgMrxExtProcessingService.generateDmcRecords(transformedMurexTrades, murexBookCode, instructionEventRuleId, traceId));
+        return stgMrxExtProcessingService.generateDmcRecords(transformedMurexTrades, murexBookCode, instructionEventRuleId, traceId);
     }
 
     @Override
@@ -195,12 +195,9 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
      * @param transformationContext transformations context with all metaData
      * @return List of transformed TransformationContext objects
      */
-    private List<TransformedMurexTrade> processSwapTransformations(final LegIdentificationResult legResult,
-                                                                   final MurexBookingConfig config,
-                                                                   final TransformationContext transformationContext,
-                                                                   final List<StgMrxExtDmcDto> stgMrxExtDmcs) {
-
-        List<TransformedMurexTrade> results = new ArrayList<>();
+    private TransformationResult processSwapTransformations(final LegIdentificationResult legResult,
+                                                            final MurexBookingConfig config,
+                                                            final TransformationContext transformationContext) {
 
         try {
 
@@ -233,13 +230,11 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
             switch (configStructure.type) {
                 case BOTH_LEGS:
                     // Case 1: Both nearLeg and farLeg present
-                    results.addAll(processBothLegs(legResult, configStructure, config, transformationContext, stgMrxExtDmcs, traceId));
-                    break;
+                    return processBothLegs(legResult, configStructure, config, transformationContext, traceId);
 
                 case SINGLE_LEG:
                     // Case 2: Only one leg present (nearLeg OR farLeg)
-                    results.addAll(processSingleLeg(legResult, configStructure, config, transformationContext, stgMrxExtDmcs, traceId));
-                    break;
+                    return processSingleLeg(legResult, configStructure, config, transformationContext, traceId);
 
                 default:
                     throw new TransformationException(
@@ -256,7 +251,6 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
             );
         }
 
-        return results;
     }
 
     /**
@@ -298,15 +292,15 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
     /**
      * Process both legs transformation (Case 1)
      */
-    private List<TransformedMurexTrade> processBothLegs(LegIdentificationResult legResult,
-                                                        TransformationConfigStructure configStructure,
-                                                        MurexBookingConfig config,
-                                                        TransformationContext transformationContext,
-                                                        List<StgMrxExtDmcDto> stgMrxExtDmcs,
-                                                        String traceId) {
+    private TransformationResult processBothLegs(LegIdentificationResult legResult,
+                                                 TransformationConfigStructure configStructure,
+                                                 MurexBookingConfig config,
+                                                 TransformationContext transformationContext,
+                                                 String traceId) {
+
+        List<TransformedMurexTrade> transformedMurexTrades = new ArrayList<>();
 
         List<TransformedMurexTrade> tradeLegInputForDMC = new ArrayList<>();
-        List<TransformedMurexTrade> results = new ArrayList<>();
 
         JsonNode transformationNode = getTransformationsNode(config);
 
@@ -318,7 +312,7 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
                 TransformedMurexTrade transformedNear = applyLegTransformation(
                         legResult.nearRecord, transformationNode, config, transformationContext);
                 TransformedMurexTrade tpsFieldFilteredTrade = applyTPSFieldTransformations(transformedNear, config);
-                results.add(tpsFieldFilteredTrade);
+                transformedMurexTrades.add(tpsFieldFilteredTrade);
             }
 
             if (legConfig.has(REFERENCE_SUB_TRADE_FAR_LEG_FIELD)) {
@@ -328,12 +322,12 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
                 TransformedMurexTrade transformedFar = applyLegTransformation(
                         legResult.farRecord, transformationNode, config, transformationContext);
                 TransformedMurexTrade tpsFieldFilteredTrade = applyTPSFieldTransformations(transformedFar, config);
-                results.add(tpsFieldFilteredTrade);
+                transformedMurexTrades.add(tpsFieldFilteredTrade);
             }
         }
 
-        generaStgMurexExtDmcRecords(stgMrxExtDmcs, tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
-        return results;
+        List<StgMrxExtDmcDto> stgMrxExtDmcDtos = new ArrayList<>(generaStgMurexExtDmcRecords(tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId));
+        return new TransformationResult(transformedMurexTrades, stgMrxExtDmcDtos);
     }
 
     private JsonNode getTransformationsNode(MurexBookingConfig config) {
@@ -351,14 +345,14 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
     /**
      * Process single leg transformation (Case 2)
      */
-    private List<TransformedMurexTrade> processSingleLeg(final LegIdentificationResult legResult,
-                                                         final TransformationConfigStructure configStructure,
-                                                         final MurexBookingConfig config,
-                                                         final TransformationContext transformationContext,
-                                                         final List<StgMrxExtDmcDto> stgMrxExtDmcs,
-                                                         final String traceId) {
+    private TransformationResult processSingleLeg(final LegIdentificationResult legResult,
+                                                  final TransformationConfigStructure configStructure,
+                                                  final MurexBookingConfig config,
+                                                  final TransformationContext transformationContext,
+                                                  final String traceId) {
 
-        List<TransformedMurexTrade> results = new ArrayList<>();
+        List<TransformedMurexTrade> transformedMurexTrades = new ArrayList<>();
+        List<StgMrxExtDmcDto> stgMrxExtDmcDtos = new ArrayList<>();
 
         List<TransformedMurexTrade> tradeLegInputForDMC = new ArrayList<>();
 
@@ -373,9 +367,9 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
                         legResult.nearRecord, transformationNode, config, transformationContext);
                 TransformedMurexTrade tpsFieldFilteredTrade = applyTPSFieldTransformations(transformedNear, config);
 
-                results.add(tpsFieldFilteredTrade);
+                transformedMurexTrades.add(tpsFieldFilteredTrade);
 
-                generaStgMurexExtDmcRecords(stgMrxExtDmcs, tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
+                stgMrxExtDmcDtos.addAll(generaStgMurexExtDmcRecords(tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId));
             } else if (legConfig.has(REFERENCE_SUB_TRADE_FAR_LEG_FIELD)) {
 
                 tradeLegInputForDMC.add(dynamicMapper.clone(legResult.farRecord));
@@ -384,13 +378,12 @@ public class FxSwapTransformationStrategy extends TransformationStrategy {
                         legResult.farRecord, transformationNode, config, transformationContext);
                 TransformedMurexTrade tpsFieldFilteredTrade = applyTPSFieldTransformations(transformedFar, config);
 
-                results.add(tpsFieldFilteredTrade);
-
-                generaStgMurexExtDmcRecords(stgMrxExtDmcs, tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
+                transformedMurexTrades.add(tpsFieldFilteredTrade);
+                stgMrxExtDmcDtos.addAll(generaStgMurexExtDmcRecords(tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId));
             }
         }
 
-        return results;
+        return new TransformationResult(transformedMurexTrades, stgMrxExtDmcDtos);
     }
 
 

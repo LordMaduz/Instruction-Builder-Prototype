@@ -1,6 +1,7 @@
 package com.ruchira.murex.service;
 
 import com.ruchira.murex.dto.StgMrxExtDmcDto;
+import com.ruchira.murex.model.RecordProcessingResult;
 import com.ruchira.murex.model.trade.MurexTrade;
 import com.ruchira.murex.model.TransformationContext;
 import com.ruchira.murex.strategy.TransformationStrategyFactory;
@@ -30,7 +31,7 @@ public class MurexDataTransformationService {
      *                              The input currency for transformation calculations, and all grouped records
      */
     @Transactional
-    public Pair<List<StgMrxExtDmcDto>, List<MurexTrade>> generateMurexBookings(TransformationContext transformationContext) {
+    public RecordProcessingResult generateMurexBookings(TransformationContext transformationContext) {
 
         String typology = transformationContext.getGroupedRecord().getTypology();
 

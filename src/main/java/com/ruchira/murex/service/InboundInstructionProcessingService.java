@@ -1,6 +1,7 @@
 package com.ruchira.murex.service;
 
 import com.ruchira.murex.kafka.model.HAWKMurexBookingRecord;
+import com.ruchira.murex.model.Currency;
 import com.ruchira.murex.util.ConcurrencyUtil;
 import com.ruchira.murex.dto.InstructionRequestDto;
 import com.ruchira.murex.dto.StgMrxExtDmcDto;
@@ -13,16 +14,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static com.ruchira.murex.constant.Constants.*;
 
@@ -96,21 +94,28 @@ public class InboundInstructionProcessingService {
                                                          InstructionRequestDto requestDto,
                                                          Map<String, InstructionEventConfig> ruleMap,
                                                          List<String> currenciesInFamily) throws Exception {
-        List<MurexTrade> allMurexTrades = new ArrayList<>();
-        List<StgMrxExtDmcDto> allStgMrxExtDmcs = new ArrayList<>();
 
-        ConcurrencyUtil.processAllOrNone(
+        List<RecordProcessingResult> resultList = ConcurrencyUtil.processAllOrNone(
                 groupedRecords,
                 record -> processRecord(
                         record,
                         requestDto,
                         ruleMap,
                         groupedRecords,
-                        allStgMrxExtDmcs,
-                        allMurexTrades,
                         currenciesInFamily
                 )
         );
+
+        List<MurexTrade> allMurexTrades = resultList.stream()
+                .filter(Objects::nonNull)
+                .flatMap(r -> Objects.nonNull(r.getAllMurexTrades()) ? r.getAllMurexTrades().stream() : Stream.empty())
+                .toList();
+
+        List<StgMrxExtDmcDto> allStgMrxExtDmcs = resultList.stream()
+                .filter(Objects::nonNull)
+                .flatMap(r -> Objects.nonNull(r.getAllStgMrxExtDmcs()) ? r.getAllStgMrxExtDmcs().stream() : Stream.empty())
+                .toList();
+
 
         return new RecordProcessingResult(allStgMrxExtDmcs, allMurexTrades);
     }
@@ -196,33 +201,27 @@ public class InboundInstructionProcessingService {
      * @param dto                 Instruction request DTO providing context
      * @param ruleMap             Precomputed map of navType -> InstructionEventConfig
      * @param groupedRecords      Complete list of grouped records (for context in booking generation)
-     * @param allStgMrxExtDmcDtoS Accumulator list to collect all generated staging DTOs
-     * @param allMurexTrades      Accumulator list to collect all generated Murex trades
      */
-    private void processRecord(GroupedRecord record,
-                               InstructionRequestDto dto,
-                               Map<String, InstructionEventConfig> ruleMap,
-                               List<GroupedRecord> groupedRecords,
-                               List<StgMrxExtDmcDto> allStgMrxExtDmcDtoS,
-                               List<MurexTrade> allMurexTrades,
-                               List<String> currenciesInFamily) {
+    private RecordProcessingResult processRecord(GroupedRecord record,
+                                                 InstructionRequestDto dto,
+                                                 Map<String, InstructionEventConfig> ruleMap,
+                                                 List<GroupedRecord> groupedRecords,
+                                                 List<String> currenciesInFamily) {
         InstructionEventConfig ruleConfig = ruleMap.get(record.getNavType());
 
         if (ruleConfig == null) {
             log.warn("No rule configuration found for navType={} in instructionEvent={}",
                     record.getNavType(), dto.getInstructionEvent());
-            return; // skip or throw a business exception depending on use case
+            return null;
         }
 
         // Step 1: fetch murex booking configs linked to this rule
         List<MurexBookingConfig> bookConfigs = tradeDataHandlerService.fetchMurexBookConfigs(ruleConfig.getRuleId());
 
         // Step 2: generate bookings using record configs
-        Pair<List<StgMrxExtDmcDto>, List<MurexTrade>> bookingPair =
-                generateMurexBookings(record, bookConfigs, dto.getCurrency(), ruleConfig.getRuleId(), groupedRecords, currenciesInFamily);
 
-        allMurexTrades.addAll(bookingPair.getValue());
-        allStgMrxExtDmcDtoS.addAll(bookingPair.getKey());
+        return generateMurexBookings(record, bookConfigs, dto.getCurrency(), ruleConfig.getRuleId(), groupedRecords, currenciesInFamily);
+
     }
 
 
@@ -289,12 +288,12 @@ public class InboundInstructionProcessingService {
      *   <li>List of corresponding {@link MurexTrade} trade details</li>
      * </ul>
      */
-    public Pair<List<StgMrxExtDmcDto>, List<MurexTrade>> generateMurexBookings(GroupedRecord groupedRecord,
-                                                                               List<MurexBookingConfig> murexConfigs,
-                                                                               String inputCurrency,
-                                                                               String instructionEventRuleId,
-                                                                               List<GroupedRecord> groupedRecords,
-                                                                               List<String> currenciesInFamily) {
+    public RecordProcessingResult generateMurexBookings(GroupedRecord groupedRecord,
+                                                        List<MurexBookingConfig> murexConfigs,
+                                                        String inputCurrency,
+                                                        String instructionEventRuleId,
+                                                        List<GroupedRecord> groupedRecords,
+                                                        List<String> currenciesInFamily) {
 
         // Step 1: Filter MurexBookConfig records based on typology matching (reuse existing logic)
         List<MurexBookingConfig> filteredMurexConfigs = filterMurexConfigsByTypology(murexConfigs, groupedRecord.getTypology());

@@ -8,6 +8,7 @@ import com.ruchira.murex.dto.StgMrxExtDmcDto;
 import com.ruchira.murex.exception.TransformationException;
 import com.ruchira.murex.mapper.MurexTradeRecordMapper;
 import com.ruchira.murex.model.MurexBookingConfig;
+import com.ruchira.murex.model.RecordProcessingResult;
 import com.ruchira.murex.model.trade.MurexTrade;
 import com.ruchira.murex.model.TransformedMurexTrade;
 import com.ruchira.murex.model.TransformationContext;
@@ -15,6 +16,8 @@ import com.ruchira.murex.parser.JsonParser;
 import com.ruchira.murex.service.StgMrxExtProcessingService;
 import com.ruchira.murex.parser.DynamicFieldParser;
 import com.ruchira.murex.util.CloneUtils;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.tuple.Pair;
@@ -67,7 +70,7 @@ public abstract class TransformationStrategy {
      *     <li>List of {@link MurexTrade} trade details produced alongside the DTOs</li>
      * </ul>
      */
-    public abstract Pair<List<StgMrxExtDmcDto>, List<MurexTrade>> process(TransformationContext transformationContext);
+    public abstract RecordProcessingResult process(TransformationContext transformationContext);
 
     /**
      * Get the transformation type name
@@ -304,5 +307,12 @@ public abstract class TransformationStrategy {
         return list.stream()
                 .map(Object::toString)
                 .collect(Collectors.toSet());
+    }
+
+    @Data
+    @AllArgsConstructor
+    public class TransformationResult {
+        private List<TransformedMurexTrade> murexTradeList;
+        private List<StgMrxExtDmcDto> stgMrxExtDmcs;
     }
 }

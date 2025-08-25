@@ -48,13 +48,13 @@ public class FxSpotTransformationStrategy extends TransformationStrategy {
     }
 
     @Override
-    public Pair<List<StgMrxExtDmcDto>, List<MurexTrade>> process(final TransformationContext transformationContext) {
+    public RecordProcessingResult process(final TransformationContext transformationContext) {
 
         final GroupedRecord groupedRecord = transformationContext.getGroupedRecord();
         validateRecordCount(groupedRecord);
 
-        List<MurexTrade> murexTrades = new ArrayList<>();
-        List<StgMrxExtDmcDto> stgMrxExtDmcs = new ArrayList<>();
+        List<MurexTrade> allMurexTrades = new ArrayList<>();
+        List<StgMrxExtDmcDto> allStgMrxExtDmcs = new ArrayList<>();
 
         AggregatedDataResponse record = groupedRecord.getRecords().getFirst();
 
@@ -64,8 +64,8 @@ public class FxSpotTransformationStrategy extends TransformationStrategy {
             final String traceId = TraceIdGenerator.generateTimestampBasedTraceId();
             try {
                 final List<TransformedMurexTrade> tradeLegInputForDMC = mapAggregatedDataRecordsToTradeLegs(groupedRecord);
-
-                generaStgMurexExtDmcRecords(stgMrxExtDmcs, tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
+                final List<StgMrxExtDmcDto> stgMrxExtDmcs = generaStgMurexExtDmcRecords(tradeLegInputForDMC, config.getMurexBookCode(), transformationContext.getInstructionEventRuleId(), traceId);
+                allStgMrxExtDmcs.addAll(stgMrxExtDmcs);
 
                 final TransformedMurexTrade tradeLeg = createBaseBooking(record, config, traceId);
                 validateSpotTransformations(config);
@@ -73,10 +73,8 @@ public class FxSpotTransformationStrategy extends TransformationStrategy {
                 applyOutputCustomizations(tradeLeg, config);
 
                 TransformedMurexTrade outPutLeg = applyTPSFieldTransformations(tradeLeg, config);
-
                 final MurexTrade murexTrade = buildMurexTrade(outPutLeg);
-
-                murexTrades.add(murexTrade);
+                allMurexTrades.add(murexTrade);
             } catch (Exception e) {
                 throw new TransformationException(
                         String.format("Failed to transform record for config %s : %s", config.getId(), e.getMessage()),
@@ -86,7 +84,7 @@ public class FxSpotTransformationStrategy extends TransformationStrategy {
             }
         }
 
-        return Pair.of(stgMrxExtDmcs, murexTrades);
+        return new RecordProcessingResult(allStgMrxExtDmcs, allMurexTrades);
     }
 
     private MurexTrade buildMurexTrade(TransformedMurexTrade trade) {
@@ -121,14 +119,13 @@ public class FxSpotTransformationStrategy extends TransformationStrategy {
     }
 
 
-    private void generaStgMurexExtDmcRecords(
-            final List<StgMrxExtDmcDto> stgMrxExtDmcs,
+    private List<StgMrxExtDmcDto> generaStgMurexExtDmcRecords(
             final List<TransformedMurexTrade> transformedMurexTrades,
             final String murexBookCode,
             final String instructionEventRuleId,
             final String traceId
     ) {
-        stgMrxExtDmcs.addAll(stgMrxExtProcessingService.generateDmcRecords(transformedMurexTrades, murexBookCode, instructionEventRuleId, traceId));
+        return stgMrxExtProcessingService.generateDmcRecords(transformedMurexTrades, murexBookCode, instructionEventRuleId, traceId);
     }
 
     private void validateSpotTransformations(MurexBookingConfig config) {
